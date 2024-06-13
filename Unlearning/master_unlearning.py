@@ -7,7 +7,7 @@ import copy
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
-from PyHessian.pyhessian import hessian # Hessian computation
+from pyhessian import hessian # Hessian computation
 from ResNet_CIFAR10 import *
 from VGG_model import *
 import os
@@ -120,37 +120,65 @@ unl_error_list = []
 M_pretrain = copy.deepcopy(net)
 w_pretrain_weights_tensor = [param for param in M_pretrain.parameters()]
 w_0_weights = weights_to_list_fast(w_pretrain_weights_tensor)
-for ep in range(0,args.pretrain_epochs):
-  print(f'on pretraining epoch = {ep}')
-  for i,(imgs,labels) in enumerate(train_loader):
-    imgs = imgs.to(device)
-    labels = labels.to(device)
-    optimizer.zero_grad()
-    out = net(imgs)
-    loss = std_loss(out,labels)
-    loss.backward()
-    optimizer.step()
-    #do you want to measure stuff?
-    if i%args.eval_every == 0:
+import time
+
+for ep in range(0, args.pretrain_epochs):
+    print(f'on pretraining epoch = {ep}')
+    for i, (imgs, labels) in enumerate(train_loader):
+        # TIMER 1 STARTS HERE
+        timer1_start = time.time()
+
+        imgs = imgs.to(device)
+        labels = labels.to(device)
+        optimizer.zero_grad()
+        out = net(imgs)
+        loss = std_loss(out, labels)
+        loss.backward()
+        optimizer.step()
+
+        timer1_end = time.time()
+        timer1_duration = timer1_end - timer1_start
+        print(f'TIMER 1 Duration: {timer1_duration} seconds')
+        # TIMER 1 ENDS HERE
+
+        # Do you want to measure stuff?
+        if i % args.eval_every == 0:
+            # TIMER 2 STARTS HERE
+            timer2_start = time.time()
+
             net.eval()
-            hessian_comp = hessian(net, std_loss, data=(imgs, labels), cuda=True)
+            hessian_comp = hessian(net, std_loss, data=(imgs, labels), cuda=False)  # , cuda=True
             top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues()
-            sigma = np.sqrt(top_eigenvalues[-1])
+            print(type(top_eigenvalues))
+            sigma = np.sqrt(abs(top_eigenvalues[-1]))
             sigma_list.append(sigma)
-            #Now, save the weights 
+            timer2_end = time.time()
+            timer2_duration = timer2_end - timer2_start
+            print(f'TIMER 2 Duration: {timer2_duration} seconds')
+            timer3_start = time.time()
+            # Now, save the weights
             M_weights_tensor = [param for param in net.parameters()]
             curr_weights = weights_to_list_fast(M_weights_tensor)
-            
             delta_weights = np.linalg.norm((np.array(curr_weights) - np.array(w_0_weights)))
-            unl_error = (lr * lr) *((len(train_loader)*ep)+ i) *(1/2) * delta_weights *sigma
-            rolling_unl_error = (lr * lr) *((len(train_loader)*ep)+ i) *(1/2) * delta_weights * (sum(sigma_list)/len(sigma_list))
-            
-            #now compute the verification error
+            unl_error = (lr * lr) * ((len(train_loader) * ep) + i) * (1 / 2) * delta_weights * sigma
+            rolling_unl_error = (lr * lr) * ((len(train_loader) * ep) + i) * (1 / 2) * delta_weights * (sum(sigma_list) / len(sigma_list))
+            timer3_end = time.time()
+            timer3_duration = timer3_end - timer3_start
+            print(f'TIMER 3 Duration: {timer3_duration} seconds')
+            timer4_start = time.time()
+            # Now compute the verification error
             delta_weights_list.append(delta_weights)
             unl_error_list.append(unl_error)
             rolling_unl_error_list.append(rolling_unl_error)
-    if i==0 and ep%10==0 and ep !=0:
-        std_reg = std_reg/ args.decay
+            timer4_end = time.time()
+            timer4_duration = timer4_end - timer4_start
+            print(f'TIMER 4 Duration: {timer4_duration} seconds')
+
+
+            # TIMER 2 ENDS HERE
+
+    if i == 0 and ep % 10 == 0 and ep != 0:
+        std_reg = std_reg / args.decay
 test_loader = torch.utils.data.DataLoader(testset,args.pretrain_batch_size,shuffle = False)
 correct, total = validate(net, test_loader)
 print(f"Testing accuracy after {args.pretrain_epochs} epoch of pretraining = {100*correct/total}")
